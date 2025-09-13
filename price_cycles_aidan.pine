@@ -1,0 +1,153 @@
+//@version=5
+indicator("Price Cycles - Aidan", overlay=true, precision=2)
+
+// ───────────── Inputs
+rngPick       = input.string("1000", "Dividends (Range Size)", options=["10", "100", "1000", "10000"])
+rangeSize     = str.tonumber(rngPick)
+fractals      = input.int(1, "Fractals (1=25%, 2=12.5%, 3=6.25%)", minval=1, maxval=3)
+showDivs      = input.bool(true,  "Show Internal Divisions")
+showLabels    = input.bool(true,  "Show Labels")
+lineW_RH_RL   = input.int(2,      "Range High/Low Line Width", minval=1, maxval=5)
+lineW_mid     = input.int(1,      "Division Line Width",       minval=1, maxval=5)
+labelOffset   = input.int(20,     "Label Offset (bars to the right)", minval=0, maxval=300)
+
+// Colors
+colRL    = input.color(color.red,    "Color Range Low")
+colRH    = input.color(color.green,  "Color Range High")
+col50    = input.color(color.orange, "Color for 50%")
+colDiv   = input.color(color.blue,   "Color for other divisions")
+txtCol   = input.color(color.black,  "Label Text Color")
+lblBg    = input.color(color.white,  "Label Background Color")
+
+// ───────────── Range Calculation
+rangeLow  = math.floor(close / rangeSize) * rangeSize
+rangeHigh = rangeLow + rangeSize
+
+// Identify when the "bucket" (range) changes
+bucket        = math.floor(close / rangeSize)
+bucketChanged = ta.change(bucket) or ta.change(rangeSize)
+
+// ───────────── Persistent objects
+var line  rl    = na
+var line  rh    = na
+var label lblRL = na
+var label lblRH = na
+
+// Arrays for internal divisions
+var line[]  divLines  = array.new_line()
+var label[] divLabels = array.new_label()
+
+// Divisions count: 1→4, 2→8, 3→16
+f_divCount(_fractals) =>
+    int(4 * math.pow(2, _fractals - 1))
+
+// Safe clear
+f_clear_divs() =>
+    while array.size(divLines) > 0
+        line.delete(array.pop(divLines))
+    while array.size(divLabels) > 0
+        label.delete(array.pop(divLabels))
+
+// Build division lines/labels
+f_build_divs() =>
+    f_clear_divs()
+    if showDivs
+        segs = f_divCount(fractals)
+        rng  = rangeHigh - rangeLow
+        for i = 1 to segs - 1
+            level   = rangeLow + rng * (i / segs)
+            isMid   = i == segs/2
+            colHere = isMid ? col50 : colDiv
+            ln = line.new(bar_index - 1, level, bar_index, level, color=colHere, width=lineW_mid, extend=extend.both)
+            array.push(divLines, ln)
+            if showLabels
+                // Label text: "xx%: price"
+                pct        = 100.0 * i / segs
+                pctRounded = math.round(pct * 100.0) / 100.0
+                lblTxt     = str.tostring(pctRounded) + "%: " + str.tostring(level)
+                lb = label.new(bar_index + labelOffset, level, lblTxt, style=label.style_label_right, textcolor=txtCol, color=lblBg)
+                array.push(divLabels, lb)
+
+// ───────────── Create main lines/labels once
+if barstate.isfirst
+    rl   := line.new(bar_index - 1, rangeLow,  bar_index, rangeLow,  color=colRL, width=lineW_RH_RL, extend=extend.both)
+    rh   := line.new(bar_index - 1, rangeHigh, bar_index, rangeHigh, color=colRH, width=lineW_RH_RL, extend=extend.both)
+    if showLabels
+        lblRL := label.new(bar_index + labelOffset, rangeLow,  "RL: " + str.tostring(rangeLow),  style=label.style_label_right, textcolor=txtCol, color=lblBg)
+        lblRH := label.new(bar_index + labelOffset, rangeHigh, "RH: " + str.tostring(rangeHigh), style=label.style_label_right, textcolor=txtCol, color=lblBg)
+    f_build_divs()
+
+// Track previous toggles
+var int  prevFractals   = fractals
+var bool prevShowDivs   = showDivs
+var bool prevShowLabels = showLabels
+
+// ───────────── Rebuild divisions and manage RL/RH labels on settings/range change
+if barstate.isnew and (bucketChanged or fractals != prevFractals or showDivs != prevShowDivs or showLabels != prevShowLabels)
+    // Rebuild div lines/labels
+    f_build_divs()
+    // Create/delete RL/RH labels on toggle
+    if showLabels and na(lblRL)
+        lblRL := label.new(bar_index + labelOffset, rangeLow,  "RL: " + str.tostring(rangeLow),  style=label.style_label_right, textcolor=txtCol, color=lblBg)
+    if showLabels and na(lblRH)
+        lblRH := label.new(bar_index + labelOffset, rangeHigh, "RH: " + str.tostring(rangeHigh), style=label.style_label_right, textcolor=txtCol, color=lblBg)
+    if not showLabels
+        if not na(lblRL)
+            label.delete(lblRL), lblRL := na
+        if not na(lblRH)
+            label.delete(lblRH), lblRH := na
+    // Update prev flags
+    prevFractals   := fractals
+    prevShowDivs   := showDivs
+    prevShowLabels := showLabels
+
+// ───────────── Update line widths/colors live
+line.set_width(rl, lineW_RH_RL), line.set_color(rl, colRL)
+line.set_width(rh, lineW_RH_RL), line.set_color(rh, colRH)
+if array.size(divLines) > 0
+    segs = f_divCount(fractals)
+    for i = 0 to array.size(divLines) - 1
+        ln    = array.get(divLines, i)
+        isMid = (i + 1) == segs/2
+        line.set_width(ln, lineW_mid)
+        line.set_color(ln, isMid ? col50 : colDiv)
+
+// ───────────── Move main lines each bar
+line.set_xy1(rl, bar_index - 1, rangeLow)
+line.set_xy2(rl, bar_index,     rangeLow)
+line.set_xy1(rh, bar_index - 1, rangeHigh)
+line.set_xy2(rh, bar_index,     rangeHigh)
+
+// ───────────── Move division lines each bar (ALWAYS), update labels only if enabled
+if array.size(divLines) > 0
+    segs = f_divCount(fractals)
+    rng  = rangeHigh - rangeLow
+    for i = 0 to array.size(divLines) - 1
+        level = rangeLow + rng * ((i + 1) / segs)
+        ln = array.get(divLines, i)
+        line.set_xy1(ln, bar_index - 1, level)
+        line.set_xy2(ln, bar_index,     level)
+        if showLabels and i < array.size(divLabels)
+            lb = array.get(divLabels, i)
+            pctRounded = math.round((100.0 * (i + 1) / segs) * 100.0) / 100.0
+            label.set_x(lb, bar_index + labelOffset)
+            label.set_y(lb, level)
+            label.set_text(lb, str.tostring(pctRounded) + "%: " + str.tostring(level))
+            label.set_textcolor(lb, txtCol), label.set_color(lb, lblBg)
+
+// ───────────── Keep RL/RH labels pinned right & update text with price (only if they exist)
+if not na(lblRL)
+    label.set_x(lblRL, bar_index + labelOffset), label.set_y(lblRL, rangeLow)
+    label.set_text(lblRL, "RL: " + str.tostring(rangeLow))
+    label.set_textcolor(lblRL, txtCol), label.set_color(lblRL, lblBg)
+if not na(lblRH)
+    label.set_x(lblRH, bar_index + labelOffset), label.set_y(lblRH, rangeHigh)
+    label.set_text(lblRH, "RH: " + str.tostring(rangeHigh))
+    label.set_textcolor(lblRH, txtCol), label.set_color(lblRH, lblBg)
+
+// ───────────── Status 
+segs   = f_divCount(fractals)
+pctPos = 100.0 * (close - rangeLow) / (rangeHigh - rangeLow)
+titleNote = "Range: " + str.tostring(rangeLow) + " – " + str.tostring(rangeHigh) + " | Fractals: " + str.tostring(fractals) + " | Divisions: " + str.tostring(segs) + " | Pos: " + str.tostring(math.round(pctPos*100.0)/100.0) + "%"
+
+plot(na)
