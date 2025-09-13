@@ -15,22 +15,6 @@ A TradingView Pine Script (v5) indicator that shows price cycle ranges with inte
 3. Save → Add to chart
 
 ## Example
-(Add your image here once ready)
-
-![Example Screenshot](examples/screenshot-1.png)
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
